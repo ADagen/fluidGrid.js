@@ -2,13 +2,15 @@ fluidGrid.js
 ============
 
 This is a jQuery plugin that allows building intuitive draggable layouts from elements spanning multiple columns and rows.
+While dragging a block the remaining blocks will flow around it with smooth animation.
+Also you can resize any blocks, plugin will reflow other block,
 Note: it's just a proof-of-concept; thanks to gridster.js for the inspiration.
 Chrome, FireFox 4+, Safari 5.1.4+, Opera 12+, IE 9+
 
-Methods usage
+Methods
 ============
 
-Initialize:
+Create grid:
 
 	$.fluidGrid({
 		columns	: 4, // number of colums in your grid,
@@ -17,6 +19,9 @@ Initialize:
 		height	: 100, // height of the minimum cell
 		spacing : 10 // distance between adjacent cells
 	});
+	
+The grid will created immediately.
+Warn: width and height of target htmlNode element will changed due to the necessity to position the blocks within.
 
 ---
 
@@ -38,10 +43,19 @@ Newly created block passed to the first argument of callback.
 
 Remove block:
 
-	$.fluidGrid('removeBlock', blockId);
-	$.fluidGrid('removeBlock', Block);
+	$.fluidGrid('removeBlock', blockId, callback);
+	$.fluidGrid('removeBlock', Block, callback);
 	
 Single param must an instance of Block class (type of Block === 'Block') or block id directly (you can store block id at 'addBlock' method callback).
+Function "callback" execute only after response of corresponding widget, although the block is removed from the array Grid.blocks[] immediately.
+
+---
+
+Destroy grid:
+
+	$.fluidGrid('destroy', success, error);
+	
+Both params are callback functions and called upon the responses from all widgets.
 
 License
 ============

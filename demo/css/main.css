@@ -16,7 +16,9 @@ p, span, a {
 body {
 	margin: 0;
 	padding: 0;
-	background-color: #ECF0F1;
+	background-image: url(../img/generic-back.jpg);
+	background-repeat: repeat-x;
+	background-color: black;
 }
 header {
 	height: 50px;
@@ -134,7 +136,7 @@ header {
 }
 #page-title .title1,
 #page-title .title2 {
-	color: black;
+	color: white;
 	font-weight: bold;
 	font-size: 13px;
 	line-height: 13px;
@@ -152,7 +154,7 @@ header {
 }
 
 footer {
-	color: grey;
+	color: lightgrey;
 	text-align: center;
 	padding-top: 20px;
 }
@@ -160,4 +162,7 @@ footer {
 footer span {
 	display: block;
 	font-family: monospace;
+}
+footer span a {
+	color: lightgrey;
 }

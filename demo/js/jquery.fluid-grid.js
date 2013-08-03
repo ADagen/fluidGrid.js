@@ -2,7 +2,7 @@
  *	Плагин, возвращающий "таблицу" с возможностью добавления перетаскиваемых блоков.
  *	Перетаскиваемый блок расталкивает остальные
  *
- *	Это концепт, много незаконченных функций, неоптимизированный функционал
+ *	Note: это proof-of-concept
  *	Chrome, FireFox 4+, Safari 5.1.4+, Opera 12+, IE 9+
  *	(для поддержки IE ниже 9 можно использовать расширения Array.prototype от Mozilla Foundation)
  *	Opera 10+ при наличии в вызывающем коде полифила для Function.prototype.bind
@@ -41,9 +41,16 @@
                status 	: 'initialized',
                grid 	: grid
 			});
+			
+			return this
 		},
 
-		destroy: function() {
+		/**
+		 * Уничтожение таблицы (исходный html-элемент не меняется)
+		 * @param {function} success коллбек при успешном уничтожении
+		 * @param {function} error коллбек при отмене уничтожения (например виджет запретил)
+		 */
+		destroy: function(success, error) {
 			return this.each(function() {
 				var $this = $(this),
 					data = $this.data('fluidGrid');
@@ -52,12 +59,15 @@
 				// виджеты могут содержать важные данные,
 				// поэтому полное уничтожение таблицы после ответа виджетов (коллбек accepted)
 				data.grid.closeQuery({
-					accepted: function() {
+					accepted: function(event) {
 						data.grid.destroy();
 						$this.removeData('fluidGrid');
+						if(typeof success === 'function') success(event);
 					},
-					rejected: function() {
-						alert('Пожалуйста, сохраните данные перед выходом.');
+					rejected: function(event) {
+						// это сообщение ниже должен делать виджет или вызывающий код (в обработчике коллбека error)
+						// alert('Пожалуйста, сохраните данные перед выходом.');
+						if(typeof error === 'function') error(event);
 					}
 				});
 			})
@@ -81,14 +91,23 @@
 				
 			options.grid = data.grid;
 			data.grid.addBlock(options, then);
+			
+			return this
 		},
 		
 		/**
 		 * Удаление блока из таблицы
-		 * @param block параметры блока
+		 * Callback вызывается только после реального удаления виджета, а из массива Grid.blocks блок удаляется сразу
+		 * @param block {Block|int} экземпляр класса Block или id блока
+		 * @param then {function} коллбек, который будет вызван после уничтожения блока (когда виджет сохранит данные)
 		 */
-		removeBlock : function(block) {
-		
+		removeBlock : function(block, then) {
+			var $this = $(this),
+				data = $this.data('fluidGrid');
+				
+			data.grid.removeBlock(block, then);
+			
+			return this
 		}
 	};
 
@@ -117,17 +136,6 @@
 		this.stateHistory = []; // стек состояний таблицы
 		
 		this.createInterface();
-	}
-	/**
-	 * Запрос к блокам на уничтожение, положительный (accepted) результат только когда все виджеты подтвердили;
-	 * rejected если хотя бы один виджет отказал (параметром вызывается массив с блоками, в которых отказали виджеты)
-	 * @param callbacks: поля accepted и rejected с соответствующими названиям функциями
-	 */
-	Grid.prototype.closeQuery = function(callbacks) {
-		this.blocks.forEach(function(block) {
-			if(!block) { return }
-			block.closeQuery();
-		});
 	}
 	
 	/**
@@ -167,6 +175,7 @@
 					});
 			this.backgrounds.push(newBackCell);
 		}
+		console.log('this.backgrounds', this.backgrounds);
 	};
 	
 	/**
@@ -410,16 +419,88 @@
 	};
 	
 	/**
-	 * Уничтожает таблицу и все добавленные в неё блоки
+	 * Запрос к блокам на уничтожение, положительный (accepted) результат только когда все виджеты подтвердили;
+	 * rejected если хотя бы один виджет отказал (параметром вызывается массив с блоками, в которых отказали виджеты)
+	 * @param {object} callbacks - поля accepted и rejected с соответствующими названиям функциями
 	 */
-	Grid.prototype.destroy = function() {
+	Grid.prototype.closeQuery = function(callbacks) {
+		var rejected = [],
+			calledBlock = 0, // счётчик блоков, которым были отправлены запросы
+			responsedBlocks = 0; // счётчик блоков, которые ответили
+			
 		this.blocks.forEach(function(block) {
 			if(!block) { return }
-			block.destroy && block.destroy();
+			calledBlock++;
+			this.removeBlock(block, function(response) {
+				responsedBlocks++;
+				
+				if (!response.success) {
+					rejected.push(block);
+				}
+				
+				// все блоки опрошены
+				if (calledBlock == responsedBlocks) {
+					if (rejected.length) { // есть хотя бы один отказавший блок
+						if (callbacks && typeof callbacks.rejected === 'function') callbacks.rejected(rejected);
+					} else { // уничтожение прошло успешно
+						this.destroy();
+						if (callbacks && typeof callbacks.accepted === 'function') callbacks.accepted();
+					}
+				}
+			}.bind(this));
+		}.bind(this));
+	};
+	
+	/**
+	 * Убирает блок из таблицы
+	 * @param block {Block|int} - экземпляр класса Block или id блока
+	 */
+	Grid.prototype.removeBlock = function(block, then) {
+		var id = 0, // id целевого блока
+			index = 0, // индекс целевого блока в массиве Grid.blocks
+			targetBlock = {}; // целевой блок (инстанс Block)
+			
+		if (block instanceof Block) {
+			targetBlock = block;
+			id = block.uid;
+			this.blocks.some(function(e, i) {
+				if (!e) return;
+				index = i;
+				return e.uid == id
+			});
+		} else {
+			id = block;
+			this.blocks.some(function(e, i) {
+				if (!e) return;
+				index = i;
+				targetBlock = e;
+				return e.uid == id
+			});
+		}
+		
+		targetBlock.closeQuery(function(response) {
+			if(!response.success) return;
+			console.log('targetBlock.closeQuery accept');
+			if (typeof then === 'function') then(response);
+			this.blocks.splice(index, 1);
+		}.bind(this));
+		
+		
+		// и сохраняю в стек состояний новое состояние
+		this.stateHistory.unshift(this.getCurrentState());
+	};
+	
+	/**
+	 * Уничтожает таблицу и все добавленные в неё блоки
+	 */
+	Grid.prototype.destroy = function() {	
+		this.backgrounds.forEach(function($cell) {
+			$cell.remove();
 		});
-		this.$html.empty();
-	}
+	};
 	// закончился класс Grid
+	
+	
 	
 	
 	
@@ -735,10 +816,22 @@
 	};
 	
 	/**
+	 * Запрос на уничтожение блока
+	 */
+	Block.prototype.closeQuery = function(then) {
+		// todo: запрос к виджету (через custom dom events?)
+		setTimeout(function() {
+			if(typeof then === 'function') { then({ success: true }); }
+			this.destroy();
+		}.bind(this), 50);
+	};
+	
+	/**
 	 * Уничтожает блок
 	 */
 	Block.prototype.destroy = function() {
-		// todo
+		this.$html.remove();
+		this.$placeholder.remove();
 	};
 
 })(jQuery);

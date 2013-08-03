@@ -1,22 +1,28 @@
 .backgroundCell {
 	background-color: #D3D3D3;
-	//border: 1px solid lightgray;
+	/*border: 1px solid lightgray;*/
 	border-radius: 5px;
+	opacity: 0.5;
 	transition: all 0.3s;
 	float: left;
 }
 
 .backgroundCell:hover {
-	-webkit-box-shadow: inset 0 0 10px grey;
-	-moz-box-shadow: inset 0 0 10px grey;
-	box-shadow: inset 0 0 10px grey;
+	-webkit-box-shadow: inset 0 0 10px black;
+	-moz-box-shadow: inset 0 0 10px black;
+	box-shadow: inset 0 0 10px black;
+}
+.backgroundCell:active{
+	-webkit-box-shadow: inset 0 0 20px black;
+	-moz-box-shadow: inset 0 0 20px black;
+	box-shadow: inset 0 0 20px black;
 }
 
 
 .gridBlock {
 	background-color: #33A905;
 	border-radius: 5px;
-	border: 1px solid gray;
+	border: 2px solid #1A402A;
 	box-sizing: border-box;
 	-webkit-transition: opacity 0.3s;
 	transition: opacity 0.3s;

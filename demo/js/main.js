@@ -1,11 +1,36 @@
-jQuery(document).ready(initPage);
+(function($) {
+
+var myRegistry = [];
+
+$(document).ready(initPage);
 
 /**
  * Создаёт собственно внешний вид таблицы
  */
 function initPage() {
 
-	jQuery('#widgets').fluidGrid({
+	createGrid();
+	
+	setTimeout(function() {
+		$('#widgets').fluidGrid('removeBlock', myRegistry[3]);
+		alert('Тест удаления блока: пройден, если блок №3 удалён');
+	}, 3000);
+	
+	setTimeout(function() {
+		$('#widgets').fluidGrid('destroy');
+		alert('Тест удаления всей таблицы, ещё через 3 секунды будет создана заново');
+	}, 6000);
+	
+	setTimeout(function() {
+		createGrid();
+	}, 9000);
+}
+
+/**
+ * Отладочная функция, создаёт и наполняет таблицу
+ */
+function createGrid() {
+	$('#widgets').fluidGrid({
 		columns	: 4,
 		rows	: 5,
 		width	: 235,
@@ -15,7 +40,7 @@ function initPage() {
 	
 	loadWidgetsFromServer(function(response) {
 		response.forEach(function(block) {
-			jQuery('#widgets').fluidGrid('addBlock', block, initializeWidget);
+			$('#widgets').fluidGrid('addBlock', block, initializeWidget);
 		});
 	});
 }
@@ -38,7 +63,8 @@ function initializeWidget(block) {
 		medium 	= $('<div>', { 'class' : 'button button-medium'	, 'title' : 'Medium'}),
 		big 	= $('<div>', { 'class' : 'button button-big'	, 'title' : 'Big'}),
 		title	= $('<div>', { 'class' : 'title'}).html(block.uid);
-		
+	
+	myRegistry.push(block);
 	block.$html.append(big, medium, small, title);
 	
 	small.on(	'click touch', block.switchSize.bind(block, 1, 1));
@@ -74,3 +100,5 @@ sampleBlocks = [{
 	top		: 0,
 	url		: ''
 }];
+
+})(jQuery);
