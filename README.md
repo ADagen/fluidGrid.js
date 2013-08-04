@@ -41,7 +41,7 @@ Add new block:
 First parameter is an object literal with options,
 and the second parameter is a function called after adding block to a grid when a load widget event occurs.
 Newly created block passed to the first argument of callback; {Block} block have a couple of methods for interacting with a custom widget.
-More about Block class: https://github.com/dagen-niger/fluidGrid.js/blob/master/README.md (russian language!)
+More about Block class: https://github.com/dagen-niger/fluidGrid.js/blob/master/BLOCK.md (russian language!)
 
 ---
 
