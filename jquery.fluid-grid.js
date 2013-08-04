@@ -2,7 +2,7 @@
  *	Плагин, возвращающий "таблицу" с возможностью добавления перетаскиваемых блоков.
  *	Перетаскиваемый блок расталкивает остальные
  *
- *	Это концепт, много незаконченных функций, неоптимизированный функционал
+ *	Note: это proof-of-concept
  *	Chrome, FireFox 4+, Safari 5.1.4+, Opera 12+, IE 9+
  *	(для поддержки IE ниже 9 можно использовать расширения Array.prototype от Mozilla Foundation)
  *	Opera 10+ при наличии в вызывающем коде полифила для Function.prototype.bind
@@ -41,9 +41,16 @@
                status 	: 'initialized',
                grid 	: grid
 			});
+			
+			return this
 		},
 
-		destroy: function() {
+		/**
+		 * Уничтожение таблицы (исходный html-элемент не меняется)
+		 * @param {function} success коллбек при успешном уничтожении
+		 * @param {function} error коллбек при отмене уничтожения (например виджет запретил)
+		 */
+		destroy: function(success, error) {
 			return this.each(function() {
 				var $this = $(this),
 					data = $this.data('fluidGrid');
@@ -52,12 +59,15 @@
 				// виджеты могут содержать важные данные,
 				// поэтому полное уничтожение таблицы после ответа виджетов (коллбек accepted)
 				data.grid.closeQuery({
-					accepted: function() {
+					accepted: function(event) {
 						data.grid.destroy();
 						$this.removeData('fluidGrid');
+						if(typeof success === 'function') success(event);
 					},
-					rejected: function() {
-						alert('Пожалуйста, сохраните данные перед выходом.');
+					rejected: function(event) {
+						// это сообщение ниже должен делать виджет или вызывающий код (в обработчике коллбека error)
+						// alert('Пожалуйста, сохраните данные перед выходом.');
+						if(typeof error === 'function') error(event);
 					}
 				});
 			})
@@ -81,14 +91,23 @@
 				
 			options.grid = data.grid;
 			data.grid.addBlock(options, then);
+			
+			return this
 		},
 		
 		/**
 		 * Удаление блока из таблицы
-		 * @param block параметры блока
+		 * Callback вызывается только после реального удаления виджета, а из массива Grid.blocks блок удаляется сразу
+		 * @param block {Block|int} экземпляр класса Block или id блока
+		 * @param then {function} коллбек, который будет вызван после уничтожения блока (когда виджет сохранит данные)
 		 */
-		removeBlock : function(block) {
-		
+		removeBlock : function(block, then) {
+			var $this = $(this),
+				data = $this.data('fluidGrid');
+				
+			data.grid.removeBlock(block, then);
+			
+			return this
 		}
 	};
 
@@ -117,17 +136,6 @@
 		this.stateHistory = []; // стек состояний таблицы
 		
 		this.createInterface();
-	}
-	/**
-	 * Запрос к блокам на уничтожение, положительный (accepted) результат только когда все виджеты подтвердили;
-	 * rejected если хотя бы один виджет отказал (параметром вызывается массив с блоками, в которых отказали виджеты)
-	 * @param callbacks: поля accepted и rejected с соответствующими названиям функциями
-	 */
-	Grid.prototype.closeQuery = function(callbacks) {
-		this.blocks.forEach(function(block) {
-			if(!block) { return }
-			block.closeQuery();
-		});
 	}
 	
 	/**
@@ -175,9 +183,22 @@
 	 * @param then коллбек, вызываемый после добавления
 	 */
 	Grid.prototype.addBlock = function(options, then) {
-		this.blocks.push(new Block(options, then));
-		// и сохраняю в стек состояний
-		this.stateHistory.unshift(this.getCurrentState());
+		var newBlock = new Block(options, function() {})
+		this.blocks.push(newBlock);
+		
+		if(this.checkForReflow(newBlock)) {
+			this.stateHistory.unshift(this.getCurrentState());
+			if (typeof then === 'function') then({
+				success: true,
+				block: newBlock
+			});
+		} else {
+			newBlock.destroy();
+			this.blocks.pop();
+			if (typeof then === 'function') then({
+				success: false
+			});
+		}
 	};
 	
 	/**
@@ -187,11 +208,11 @@
 	Grid.prototype.blockResizeHandler = function(sender) {
 		if(this.checkForReflow(sender)) {
 			// получилось расположить - сохраняет новое состояние
-			this.applyState(this.intermediateState, 'forced');
+			this.applyState(this.intermediateState);
 			this.stateHistory.unshift(this.intermediateState);
 		} else {
 			// откат к предыдущему состоянию
-			this.applyState(this.stateHistory[0], 'forced');
+			this.applyState(this.stateHistory[0]);
 			alert('Нет места для увеличения блока. Попробуйте сначала уменьшить другой блок.');
 		}
 	};
@@ -222,33 +243,92 @@
 	 */
 	Grid.prototype.checkForReflow = function(sender, current) {
 		var state = this.getCurrentState(),
-			reflowResult = {};
+			reflowResult = {},
+			anyCollisions = this.isAnyCollisions(state),
+			anyOverflows = this.isAnyOverflows(state);
 		
 		// проверить - если нет пересечений, то сразу вернуть true
-		if(!this.isAnyCollisions(state) && !this.isAnyOverflows(state)) {
+		if (!anyCollisions && !anyOverflows) {
 			this.reflowSuccess = true;
 			this.intermediateState = state;
 			return true
 		}
 
 		// иначе пытается раздвинуть блоки
-		reflowResult = this.solvePuzzle(sender, current, state);
+		// сначала малой кровью, только пересекающиеся (только для коллизий)
+		if (!anyOverflows) {
+			reflowResult = this.solveOverlaidBlocks(sender, current, state);
+		}
+		// затем полностью перестраивая
+		if (!reflowResult.success) {
+			reflowResult = this.solvePuzzle(sender, current, state);
+		}
+		
 		this.reflowSuccess = reflowResult.success;
-		if(reflowResult.success) {
+		if (reflowResult.success) {
 			// сохраняется, чтобы после окончания перетаскивания отправить в стек состояний
 			this.applyState(reflowResult.newState);
 			this.intermediateState = reflowResult.newState;
 		}
 		return reflowResult.success
-	}
+	};
+	
+	/**
+	 * Пытается расположить заново только блоки, перекрытые перетаскиваемым
+	 * @param {Block} sender - перетаскиваемый Block
+	 * @param current - текущая проекция блока на сетку ячеек
+	 * @param state - состояние (с пересечением, для которого старается перерасположить блоки)
+	 * @return {object} с полями boolean (получилось ли расположить) и newState (новое расположение)
+	 */
+	Grid.prototype.solveOverlaidBlocks = function(sender, current, state) {
+		var newState = [],
+			success = false,
+			o 		= this.options,
+			columns = o.columns,
+			rows 	= o.rows,
+			overlaid = this.getCollisionsWith(state, sender), // получил элементы, с которыми пересечение
+			idsOverlaid = overlaid.map(function(element) {
+				return element.block.uid;
+			});
+			
+		// блок вылезает за границы сетки; отправить сразу в solvePuzzle
+		if (!overlaid.length) {
+			return { success : false }
+		}
+			
+		// сортировка добавляемых элементов по уменьшению площади блоков
+		overlaid.sort(function(a, b) {
+			return (b.block.getYardage() - a.block.getYardage())
+		});
+		
+		// непересекающиеся блоки добавить сразу в newState
+		// так как остальные блоки будут обтекать их
+		state.forEach(function(projection, index) {
+			if (idsOverlaid.indexOf(projection.block.uid) == -1) {
+				newState.push(projection);
+			}
+		});
+		
+		// попытка замостить сетку блоками в таком порядке
+		// (брать по очереди блоки и располагать как можно ближе к текущему положению)
+		// вернуть результат попытки
+		success = overlaid.every(function(piece) {
+			return this.tryAddToPuzzle(piece, newState);
+		}, this);
+		
+		return {
+			success	: success,
+			newState: newState
+		}
+	};
 	
 	/**
 	 * Пытается расположить блоки заново,
 	 * отталкиваясь от текущего состояния перетаскиваемого блока
-	 * @param sender - перетаскиваемый Block
+	 * @param {Block} sender - перетаскиваемый Block
 	 * @param current - текущая проекция блока на сетку ячеек
 	 * @param state - состояние (с пересечением, для которого старается перерасположить блоки)
-	 * @return boolean, получилось ли расположить
+	 * @return {object} с полями boolean (получилось ли расположить) и newState (новое расположение)
 	 */
 	Grid.prototype.solvePuzzle = function(sender, current, state) {
 		var newState = [],
@@ -275,13 +355,13 @@
 			hOverflow = p.left + p.colspan - columns,
 			vOverflow = p.top + p.rowspan - rows;
 		
-		if(hOverflow > 0) { p.left -= hOverflow }
-		if(vOverflow > 0) { p.top  -= vOverflow }
+		if (hOverflow > 0) { p.left -= hOverflow }
+		if (vOverflow > 0) { p.top  -= vOverflow }
 		
 		// попытка замостить сетку блоками в таком порядке
 		// (брать по очереди блоки и располагать как можно ближе к текущему положению)
 		// вернуть результат попытки
-		success =  state.every(function(piece) {
+		success = state.every(function(piece) {
 			return this.tryAddToPuzzle(piece, newState);
 		}, this);
 		
@@ -293,7 +373,7 @@
 	
 	/**
 	 * Событие перетаскивания внутреннего блока
-	 * пареметры сетки берутся от текущего grid
+	 * параметры сетки берутся от текущего grid
 	 * @param piece - проекция блока
 	 * @param newState - состояние, в которое проекция будет пытаться добавляться
 	 * @return boolean, получилось ли расположить
@@ -331,8 +411,33 @@
 	
 	/**
 	 * Проверяет блоки из переданного состояния на наличие пересечений
+	 * @param {Array} state - состояние сетки (из стека состояний)
+	 * @param {Block} target - состояние сетки (из стека состояний)
+	 * @return {Array} блоки, которые пересекаются с текущим
+	 */
+	Grid.prototype.getCollisionsWith = function(state, target) {
+		var collisions = [],
+			length = state.length,
+			i, j;
+			
+		for(i = 0; i < length; i++) {
+			for(j = 0; j < length; j++) {
+				var p1 = state[i], // projection1
+					p2 = state[j]; // projection2
+					
+				if (p1.block.uid == p2.block.uid) { continue }
+				if (Block.prototype.isIntersected(p1, p2)) {
+					if (p1.block.uid == target.uid) { collisions.push(p2); }
+				}
+			}
+		}	
+		return collisions
+	};
+	
+	/**
+	 * Проверяет блоки из переданного состояния на наличие пересечений
 	 * @param state - состояние сетки (из стека состояний)
-	 * @return boolean == true, когда есть пересечения
+	 * @return {boolean} == true, когда есть пересечения
 	 */
 	Grid.prototype.isAnyCollisions = function(state) {
 		var haveCollision = false,
@@ -380,7 +485,7 @@
 	Grid.prototype.stopDragMode = function() {
 		if(this.reflowSuccess) {
 			//this.stateHistory.unshift(this.getCurrentState());
-			this.applyState(this.intermediateState, 'forced');
+			this.applyState(this.intermediateState);
 			this.stateHistory.unshift(this.intermediateState);
 		} else {
 			this.applyState(this.stateHistory.shift());
@@ -401,25 +506,96 @@
 	/**
 	 * Применяет состояние к блокам
 	 * @param state
-	 * @param forsed при true изменяет состояние блока, а не только визуально передвигает
 	 */
-	Grid.prototype.applyState = function(state, forced) {
+	Grid.prototype.applyState = function(state) {
 		state.forEach(function(p) {
-			p.block.applyProjection(p, forced);
+			p.block.applyProjection(p);
 		});
+	};
+	
+	/**
+	 * Запрос к блокам на уничтожение, положительный (accepted) результат только когда все виджеты подтвердили;
+	 * rejected если хотя бы один виджет отказал (параметром вызывается массив с блоками, в которых отказали виджеты)
+	 * @param {object} callbacks - поля accepted и rejected с соответствующими названиям функциями
+	 */
+	Grid.prototype.closeQuery = function(callbacks) {
+		var rejected = [],
+			calledBlock = 0, // счётчик блоков, которым были отправлены запросы
+			responsedBlocks = 0; // счётчик блоков, которые ответили
+			
+		this.blocks.forEach(function(block) {
+			if(!block) { return }
+			calledBlock++;
+			this.removeBlock(block, function(response) {
+				responsedBlocks++;
+				
+				if (!response.success) {
+					rejected.push(block);
+				}
+				
+				// все блоки опрошены
+				if (calledBlock == responsedBlocks) {
+					if (rejected.length) { // есть хотя бы один отказавший блок
+						if (callbacks && typeof callbacks.rejected === 'function') callbacks.rejected(rejected);
+					} else { // уничтожение прошло успешно
+						this.destroy();
+						if (callbacks && typeof callbacks.accepted === 'function') callbacks.accepted();
+					}
+				}
+			}.bind(this));
+		}.bind(this));
+	};
+	
+	/**
+	 * Убирает блок из таблицы
+	 * @param block {Block|int} - экземпляр класса Block или id блока
+	 */
+	Grid.prototype.removeBlock = function(block, then) {
+		var id = 0, // id целевого блока
+			index = 0, // индекс целевого блока в массиве Grid.blocks
+			targetBlock = {}; // целевой блок (инстанс Block)
+		
+		// нахожу необходимые параметры
+		// (так как блок в аргументах функции может быть передан по-разному)
+		if (block instanceof Block) {
+			targetBlock = block;
+			id = block.uid;
+			this.blocks.some(function(e, i) {
+				if (!e) return;
+				index = i;
+				return e.uid == id
+			});
+		} else {
+			id = block;
+			this.blocks.some(function(e, i) {
+				if (!e) return;
+				index = i;
+				targetBlock = e;
+				return e.uid == id
+			});
+		}
+		
+		targetBlock.closeQuery(function(response) {
+			if(!response.success) return;
+			if (typeof then === 'function') then(response);
+			this.blocks.splice(index, 1);
+		}.bind(this));
+			
+		// и сохраняю в стек состояний новое состояние
+		this.stateHistory.unshift(this.getCurrentState());
 	};
 	
 	/**
 	 * Уничтожает таблицу и все добавленные в неё блоки
 	 */
-	Grid.prototype.destroy = function() {
-		this.blocks.forEach(function(block) {
-			if(!block) { return }
-			block.destroy && block.destroy();
+	Grid.prototype.destroy = function() {	
+		this.backgrounds.forEach(function($cell) {
+			$cell.remove();
 		});
-		this.$html.empty();
-	}
+	};
 	// закончился класс Grid
+	
+	
 	
 	
 	
@@ -582,32 +758,29 @@
 	/**
 	 * Перемещает блок согласно переданной проекции
 	 * @param p проекция
-	 * @param forced при == true обновить переменные состояния блока
 	 * @return success
 	 */
-	Block.prototype.applyProjection = function(p, forced) {
+	Block.prototype.applyProjection = function(p) {
 		if (!this.dragging) {
 			this.$html.stop().animate(this.convertCellsToCss(p), 200);
 			this.$placeholder.stop().css(this.convertCellsToCss(p));
 		}
 		
-		// усиленный режим - не только анимирую, а ещё обновляю состояние
-		if (forced) {
-			var gridOpt 	= this.grid.options,
-				cellWidth 	= gridOpt.width,
-				cellHeight 	= gridOpt.height,
-				cellSpacing = gridOpt.spacing;
-		
-			this.savedUi = {
-				position : {
-					left: p.left * (cellWidth + cellSpacing),
-					top: p.top * (cellHeight + cellSpacing)
-				}
+		// обновляю сохранённое состояние (чтобы не было лишних обращений к DOM)
+		var gridOpt 	= this.grid.options,
+			cellWidth 	= gridOpt.width,
+			cellHeight 	= gridOpt.height,
+			cellSpacing = gridOpt.spacing;
+	
+		this.savedUi = {
+			position : {
+				left: p.left * (cellWidth + cellSpacing),
+				top: p.top * (cellHeight + cellSpacing)
 			}
-			
-			if (typeof p.colspan !== 'undefined') { this.options.colspan = p.colspan }
-			if (typeof p.rowspan !== 'undefined') { this.options.rowspan = p.rowspan }
 		}
+		
+		if (typeof p.colspan !== 'undefined') { this.options.colspan = p.colspan }
+		if (typeof p.rowspan !== 'undefined') { this.options.rowspan = p.rowspan }
 	};
 	
 	/**
@@ -714,9 +887,14 @@
 	 * @param rowspan - высота
 	 */
 	Block.prototype.switchSize = function(colspan, rowspan) {
-		var o = this.options;
+		var o = this.options,
+			maxColspan = this.grid.options.columns,
+			maxRowspan = this.grid.options.rows;
 		
-		// отмена переключения, если уже такой размер
+		// отмена переключения, если новый размер блока больше размера таблицы
+		if (colspan > maxColspan || rowspan > maxRowspan) { return }
+		
+		// отмена переключения, если уже такой размер у блока
 		if (o.colspan == colspan && o.rowspan == rowspan) { return }
 		
 		o.colspan = colspan;
@@ -735,10 +913,22 @@
 	};
 	
 	/**
+	 * Запрос на уничтожение блока
+	 */
+	Block.prototype.closeQuery = function(then) {
+		// todo: запрос к виджету (через custom dom events?)
+		setTimeout(function() {
+			if(typeof then === 'function') { then({ success: true }); }
+			this.destroy();
+		}.bind(this), 50);
+	};
+	
+	/**
 	 * Уничтожает блок
 	 */
 	Block.prototype.destroy = function() {
-		// todo
+		this.$html.remove();
+		this.$placeholder.remove();
 	};
 
 })(jQuery);
