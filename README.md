@@ -3,9 +3,12 @@ fluidGrid.js
 
 This is a jQuery plugin that allows building intuitive draggable layouts from elements spanning multiple columns and rows.
 While dragging a block the remaining blocks will flow around it with smooth animation.
-Also you can resize any blocks, plugin will reflow other block,
+Also you can resize any blocks, plugin will reflow other blocks.
 Note: it's just a proof-of-concept; thanks to gridster.js for the inspiration.
 Chrome, FireFox 4+, Safari 5.1.4+, Opera 12+, IE 9+
+
+Demo: http://dagenniger.ipage.com/fluidGrid/demo.html
+Run tests: http://dagenniger.ipage.com/fluidGrid/demo.html?test=enabled
 
 Methods
 ============
@@ -37,7 +40,8 @@ Add new block:
 	
 First parameter is an object literal with options,
 and the second parameter is a function called after adding block to a grid when a load widget event occurs.
-Newly created block passed to the first argument of callback.
+Newly created block passed to the first argument of callback; {Block} block have a couple of methods for interacting with a custom widget.
+More about Block class: https://github.com/dagen-niger/fluidGrid.js/blob/master/README.md (russian language!)
 
 ---
 

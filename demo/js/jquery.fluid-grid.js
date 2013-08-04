@@ -175,7 +175,6 @@
 					});
 			this.backgrounds.push(newBackCell);
 		}
-		console.log('this.backgrounds', this.backgrounds);
 	};
 	
 	/**
@@ -184,9 +183,22 @@
 	 * @param then коллбек, вызываемый после добавления
 	 */
 	Grid.prototype.addBlock = function(options, then) {
-		this.blocks.push(new Block(options, then));
-		// и сохраняю в стек состояний
-		this.stateHistory.unshift(this.getCurrentState());
+		var newBlock = new Block(options, function() {})
+		this.blocks.push(newBlock);
+		
+		if(this.checkForReflow(newBlock)) {
+			this.stateHistory.unshift(this.getCurrentState());
+			if (typeof then === 'function') then({
+				success: true,
+				block: newBlock
+			});
+		} else {
+			newBlock.destroy();
+			this.blocks.pop();
+			if (typeof then === 'function') then({
+				success: false
+			});
+		}
 	};
 	
 	/**
@@ -196,11 +208,11 @@
 	Grid.prototype.blockResizeHandler = function(sender) {
 		if(this.checkForReflow(sender)) {
 			// получилось расположить - сохраняет новое состояние
-			this.applyState(this.intermediateState, 'forced');
+			this.applyState(this.intermediateState);
 			this.stateHistory.unshift(this.intermediateState);
 		} else {
 			// откат к предыдущему состоянию
-			this.applyState(this.stateHistory[0], 'forced');
+			this.applyState(this.stateHistory[0]);
 			alert('Нет места для увеличения блока. Попробуйте сначала уменьшить другой блок.');
 		}
 	};
@@ -231,33 +243,92 @@
 	 */
 	Grid.prototype.checkForReflow = function(sender, current) {
 		var state = this.getCurrentState(),
-			reflowResult = {};
+			reflowResult = {},
+			anyCollisions = this.isAnyCollisions(state),
+			anyOverflows = this.isAnyOverflows(state);
 		
 		// проверить - если нет пересечений, то сразу вернуть true
-		if(!this.isAnyCollisions(state) && !this.isAnyOverflows(state)) {
+		if (!anyCollisions && !anyOverflows) {
 			this.reflowSuccess = true;
 			this.intermediateState = state;
 			return true
 		}
 
 		// иначе пытается раздвинуть блоки
-		reflowResult = this.solvePuzzle(sender, current, state);
+		// сначала малой кровью, только пересекающиеся (только для коллизий)
+		if (!anyOverflows) {
+			reflowResult = this.solveOverlaidBlocks(sender, current, state);
+		}
+		// затем полностью перестраивая
+		if (!reflowResult.success) {
+			reflowResult = this.solvePuzzle(sender, current, state);
+		}
+		
 		this.reflowSuccess = reflowResult.success;
-		if(reflowResult.success) {
+		if (reflowResult.success) {
 			// сохраняется, чтобы после окончания перетаскивания отправить в стек состояний
 			this.applyState(reflowResult.newState);
 			this.intermediateState = reflowResult.newState;
 		}
 		return reflowResult.success
-	}
+	};
+	
+	/**
+	 * Пытается расположить заново только блоки, перекрытые перетаскиваемым
+	 * @param {Block} sender - перетаскиваемый Block
+	 * @param current - текущая проекция блока на сетку ячеек
+	 * @param state - состояние (с пересечением, для которого старается перерасположить блоки)
+	 * @return {object} с полями boolean (получилось ли расположить) и newState (новое расположение)
+	 */
+	Grid.prototype.solveOverlaidBlocks = function(sender, current, state) {
+		var newState = [],
+			success = false,
+			o 		= this.options,
+			columns = o.columns,
+			rows 	= o.rows,
+			overlaid = this.getCollisionsWith(state, sender), // получил элементы, с которыми пересечение
+			idsOverlaid = overlaid.map(function(element) {
+				return element.block.uid;
+			});
+			
+		// блок вылезает за границы сетки; отправить сразу в solvePuzzle
+		if (!overlaid.length) {
+			return { success : false }
+		}
+			
+		// сортировка добавляемых элементов по уменьшению площади блоков
+		overlaid.sort(function(a, b) {
+			return (b.block.getYardage() - a.block.getYardage())
+		});
+		
+		// непересекающиеся блоки добавить сразу в newState
+		// так как остальные блоки будут обтекать их
+		state.forEach(function(projection, index) {
+			if (idsOverlaid.indexOf(projection.block.uid) == -1) {
+				newState.push(projection);
+			}
+		});
+		
+		// попытка замостить сетку блоками в таком порядке
+		// (брать по очереди блоки и располагать как можно ближе к текущему положению)
+		// вернуть результат попытки
+		success = overlaid.every(function(piece) {
+			return this.tryAddToPuzzle(piece, newState);
+		}, this);
+		
+		return {
+			success	: success,
+			newState: newState
+		}
+	};
 	
 	/**
 	 * Пытается расположить блоки заново,
 	 * отталкиваясь от текущего состояния перетаскиваемого блока
-	 * @param sender - перетаскиваемый Block
+	 * @param {Block} sender - перетаскиваемый Block
 	 * @param current - текущая проекция блока на сетку ячеек
 	 * @param state - состояние (с пересечением, для которого старается перерасположить блоки)
-	 * @return boolean, получилось ли расположить
+	 * @return {object} с полями boolean (получилось ли расположить) и newState (новое расположение)
 	 */
 	Grid.prototype.solvePuzzle = function(sender, current, state) {
 		var newState = [],
@@ -284,13 +355,13 @@
 			hOverflow = p.left + p.colspan - columns,
 			vOverflow = p.top + p.rowspan - rows;
 		
-		if(hOverflow > 0) { p.left -= hOverflow }
-		if(vOverflow > 0) { p.top  -= vOverflow }
+		if (hOverflow > 0) { p.left -= hOverflow }
+		if (vOverflow > 0) { p.top  -= vOverflow }
 		
 		// попытка замостить сетку блоками в таком порядке
 		// (брать по очереди блоки и располагать как можно ближе к текущему положению)
 		// вернуть результат попытки
-		success =  state.every(function(piece) {
+		success = state.every(function(piece) {
 			return this.tryAddToPuzzle(piece, newState);
 		}, this);
 		
@@ -302,7 +373,7 @@
 	
 	/**
 	 * Событие перетаскивания внутреннего блока
-	 * пареметры сетки берутся от текущего grid
+	 * параметры сетки берутся от текущего grid
 	 * @param piece - проекция блока
 	 * @param newState - состояние, в которое проекция будет пытаться добавляться
 	 * @return boolean, получилось ли расположить
@@ -340,8 +411,33 @@
 	
 	/**
 	 * Проверяет блоки из переданного состояния на наличие пересечений
+	 * @param {Array} state - состояние сетки (из стека состояний)
+	 * @param {Block} target - состояние сетки (из стека состояний)
+	 * @return {Array} блоки, которые пересекаются с текущим
+	 */
+	Grid.prototype.getCollisionsWith = function(state, target) {
+		var collisions = [],
+			length = state.length,
+			i, j;
+			
+		for(i = 0; i < length; i++) {
+			for(j = 0; j < length; j++) {
+				var p1 = state[i], // projection1
+					p2 = state[j]; // projection2
+					
+				if (p1.block.uid == p2.block.uid) { continue }
+				if (Block.prototype.isIntersected(p1, p2)) {
+					if (p1.block.uid == target.uid) { collisions.push(p2); }
+				}
+			}
+		}	
+		return collisions
+	};
+	
+	/**
+	 * Проверяет блоки из переданного состояния на наличие пересечений
 	 * @param state - состояние сетки (из стека состояний)
-	 * @return boolean == true, когда есть пересечения
+	 * @return {boolean} == true, когда есть пересечения
 	 */
 	Grid.prototype.isAnyCollisions = function(state) {
 		var haveCollision = false,
@@ -389,7 +485,7 @@
 	Grid.prototype.stopDragMode = function() {
 		if(this.reflowSuccess) {
 			//this.stateHistory.unshift(this.getCurrentState());
-			this.applyState(this.intermediateState, 'forced');
+			this.applyState(this.intermediateState);
 			this.stateHistory.unshift(this.intermediateState);
 		} else {
 			this.applyState(this.stateHistory.shift());
@@ -410,11 +506,10 @@
 	/**
 	 * Применяет состояние к блокам
 	 * @param state
-	 * @param forsed при true изменяет состояние блока, а не только визуально передвигает
 	 */
-	Grid.prototype.applyState = function(state, forced) {
+	Grid.prototype.applyState = function(state) {
 		state.forEach(function(p) {
-			p.block.applyProjection(p, forced);
+			p.block.applyProjection(p);
 		});
 	};
 	
@@ -459,7 +554,9 @@
 		var id = 0, // id целевого блока
 			index = 0, // индекс целевого блока в массиве Grid.blocks
 			targetBlock = {}; // целевой блок (инстанс Block)
-			
+		
+		// нахожу необходимые параметры
+		// (так как блок в аргументах функции может быть передан по-разному)
 		if (block instanceof Block) {
 			targetBlock = block;
 			id = block.uid;
@@ -480,12 +577,10 @@
 		
 		targetBlock.closeQuery(function(response) {
 			if(!response.success) return;
-			console.log('targetBlock.closeQuery accept');
 			if (typeof then === 'function') then(response);
 			this.blocks.splice(index, 1);
 		}.bind(this));
-		
-		
+			
 		// и сохраняю в стек состояний новое состояние
 		this.stateHistory.unshift(this.getCurrentState());
 	};
@@ -663,32 +758,29 @@
 	/**
 	 * Перемещает блок согласно переданной проекции
 	 * @param p проекция
-	 * @param forced при == true обновить переменные состояния блока
 	 * @return success
 	 */
-	Block.prototype.applyProjection = function(p, forced) {
+	Block.prototype.applyProjection = function(p) {
 		if (!this.dragging) {
 			this.$html.stop().animate(this.convertCellsToCss(p), 200);
 			this.$placeholder.stop().css(this.convertCellsToCss(p));
 		}
 		
-		// усиленный режим - не только анимирую, а ещё обновляю состояние
-		if (forced) {
-			var gridOpt 	= this.grid.options,
-				cellWidth 	= gridOpt.width,
-				cellHeight 	= gridOpt.height,
-				cellSpacing = gridOpt.spacing;
-		
-			this.savedUi = {
-				position : {
-					left: p.left * (cellWidth + cellSpacing),
-					top: p.top * (cellHeight + cellSpacing)
-				}
+		// обновляю сохранённое состояние (чтобы не было лишних обращений к DOM)
+		var gridOpt 	= this.grid.options,
+			cellWidth 	= gridOpt.width,
+			cellHeight 	= gridOpt.height,
+			cellSpacing = gridOpt.spacing;
+	
+		this.savedUi = {
+			position : {
+				left: p.left * (cellWidth + cellSpacing),
+				top: p.top * (cellHeight + cellSpacing)
 			}
-			
-			if (typeof p.colspan !== 'undefined') { this.options.colspan = p.colspan }
-			if (typeof p.rowspan !== 'undefined') { this.options.rowspan = p.rowspan }
 		}
+		
+		if (typeof p.colspan !== 'undefined') { this.options.colspan = p.colspan }
+		if (typeof p.rowspan !== 'undefined') { this.options.rowspan = p.rowspan }
 	};
 	
 	/**
@@ -795,9 +887,14 @@
 	 * @param rowspan - высота
 	 */
 	Block.prototype.switchSize = function(colspan, rowspan) {
-		var o = this.options;
+		var o = this.options,
+			maxColspan = this.grid.options.columns,
+			maxRowspan = this.grid.options.rows;
 		
-		// отмена переключения, если уже такой размер
+		// отмена переключения, если новый размер блока больше размера таблицы
+		if (colspan > maxColspan || rowspan > maxRowspan) { return }
+		
+		// отмена переключения, если уже такой размер у блока
 		if (o.colspan == colspan && o.rowspan == rowspan) { return }
 		
 		o.colspan = colspan;

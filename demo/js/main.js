@@ -5,26 +5,50 @@ var myRegistry = [];
 $(document).ready(initPage);
 
 /**
- * Создаёт собственно внешний вид таблицы
+ * Инициализация страницы с выбором работы - тесты запускаются при test=enabled в location.search
  */
 function initPage() {
+	location.search.indexOf('test=enabled') > -1 ? runTest() : createGrid();
+}
 
+/**
+ * Запуск тестов
+ */
+function runTest() {
+
+	alert('Тест 1: создание таблицы. Пройден, если будет создана таблица с четырьмя блоками.');
 	createGrid();
 	
 	setTimeout(function() {
+		alert('Тест 2: попытка добавление четвёртого блока 4х4. Пройден, если блок не был добавлен.');
+		$('#widgets').fluidGrid('addBlock', {
+			colspan	: 4, // этот блок точно не будет добавлен, специально сделан большим
+			rowspan	: 10,
+			left	: 0,
+			top		: 0,
+			url		: ''
+		}, initializeWidget);
+	}, 4000);
+	
+	setTimeout(function() {
+		alert('Тест 3: удаление блока. Пройден, если блок №3 удалён');
 		$('#widgets').fluidGrid('removeBlock', myRegistry[3]);
-		alert('Тест удаления блока: пройден, если блок №3 удалён');
-	}, 3000);
+	}, 8000);
 	
 	setTimeout(function() {
+		alert('Тест 4: удаления всей таблицы, ещё через 3 секунды будет создана заново.');
 		$('#widgets').fluidGrid('destroy');
-		alert('Тест удаления всей таблицы, ещё через 3 секунды будет создана заново');
-	}, 6000);
+	}, 12000);
 	
 	setTimeout(function() {
+		alert('Тест 5: создание второй таблицы на странице. Пройден, если блоки получат новые id.');
 		createGrid();
-	}, 9000);
-}
+	}, 16000);
+	
+	setTimeout(function() {
+		alert('Тест 6: ресайз блоков. Попробуйте изменять размер блоков кнопками отладочных виджетов.');
+	}, 20000);
+} 
 
 /**
  * Отладочная функция, создаёт и наполняет таблицу
@@ -58,8 +82,11 @@ function loadWidgetsFromServer(onLoad) {
 /**
  * Отладочная функция, имитирует инициализацию виджета
  */
-function initializeWidget(block) {
-	var small 	= $('<div>', { 'class' : 'button button-small'	, 'title' : 'Small' }),
+function initializeWidget(result) {
+	if(!result.success) return;
+
+	var block = result.block,
+		small 	= $('<div>', { 'class' : 'button button-small'	, 'title' : 'Small' }),
 		medium 	= $('<div>', { 'class' : 'button button-medium'	, 'title' : 'Medium'}),
 		big 	= $('<div>', { 'class' : 'button button-big'	, 'title' : 'Big'}),
 		title	= $('<div>', { 'class' : 'title'}).html(block.uid);

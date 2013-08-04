@@ -116,7 +116,27 @@ header {
 /* блок заголовка страницы */
 #page-title {
 	margin: 20px 0;
+	width: 100%;
+	position: relative;
 	display: inline-block;
+}
+#page-title > span {
+	color: white;
+	font-family: monospace;
+	font-size: 20px;
+	position: absolute;
+	right: 15px;
+	bottom: 0;
+}
+#page-title > span > a {
+	color: white;
+	transition: all 0.3s;
+	text-shadow: 0px 0px 5px red;
+}
+#page-title > span > a:hover {
+	color: white;
+	/* это не баг - несколько красных теней для эффекта Darth Vader's red lightsaber */
+	text-shadow: 0px 0px 15px red, 0px 0px 15px red, 0px 0px 15px red, 0px 0px 15px red;
 }
 #page-title .logo-nest {
 	width: 248px;
