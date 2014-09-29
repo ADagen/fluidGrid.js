@@ -7,8 +7,8 @@ Also you can resize any blocks, plugin will reflow other blocks.
 Note: it's just a proof-of-concept; thanks to gridster.js for the inspiration.  
 Chrome, FireFox 4+, Safari 5.1.4+, Opera 12+, IE 9+
 
-Demo: http://dagenniger.ipage.com/fluidGrid/demo.html  
-Run tests: http://dagenniger.ipage.com/fluidGrid/demo.html?test=enabled
+Demo: http://dagen-niger.github.io/fluidGrid.js/  
+Run tests: http://dagen-niger.github.io/fluidGrid.js/?test=enabled
 
 Methods
 ============
